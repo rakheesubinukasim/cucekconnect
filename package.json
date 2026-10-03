@@ -4,30 +4,31 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently --kill-others-on-fail \"npm run server\" \"vite\"",
+    "dev": "node node_modules/concurrently/dist/bin/concurrently.js --kill-others-on-fail \"npm run server\" \"npm run client\"",
+    "client": "node node_modules/vite/bin/vite.js",
     "server": "node server/index.js",
     "dev:full": "npm run dev",
-    "build": "vite build",
-    "preview": "vite preview"
+    "build": "node node_modules/vite/bin/vite.js build",
+    "start": "npm run build && node server/index.js",
+    "preview": "node node_modules/vite/bin/vite.js preview"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "concurrently": "latest",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.2.1",
     "cors": "latest",
     "dotenv": "latest",
     "express": "latest",
-    "firebase": "^12.19.0",
-    "ioredis": "latest",
+    "ioredis": "^5.6.1",
     "jsonwebtoken": "latest",
     "lucide-react": "latest",
-    "mongodb": "^7.6.0",
-    "mongoose": "latest",
+    "mongodb": "^6.20.0",
+    "mongoose": "^8.18.0",
     "react": "latest",
     "react-dom": "latest",
     "@socket.io/redis-adapter": "latest",
     "socket.io": "latest",
     "socket.io-client": "latest",
-    "vite": "latest",
+    "vite": "^6.4.1",
     "zod": "latest"
   }
 }

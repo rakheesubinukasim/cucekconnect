@@ -389,6 +389,7 @@ function App() {
 
   const startMatching = async (nameOverride = displayName, ownerNamePassword = '') => {
     const normalizedName = nameOverride.trim().toLowerCase();
+    const ownerAccess = normalizedName === RESERVED_DISPLAY_NAME && ownerNamePassword.trim().length > 0;
     if (!nameOverride.trim() || (normalizedName === RESERVED_DISPLAY_NAME && !ownerNamePassword)) {
       setShowNamePrompt(true);
       return;
@@ -399,8 +400,14 @@ function App() {
     setIsMatching(true);
     setIsConnected(false);
     try {
-      setPermissionMessage('Checking your CUCEK location...');
-      await requestLocation();
+      if (ownerAccess) {
+        locationRef.current = CUCEK_CENTER;
+        setLocationState('owner');
+        setPermissionMessage('Owner access verified. Location boundary bypassed.');
+      } else {
+        setPermissionMessage('Checking your CUCEK location...');
+        await requestLocation();
+      }
       setPermissionMessage(mode === 'video' ? 'Requesting camera and microphone access...' : 'Preparing your private session...');
       await requestMedia();
     } catch (error) {
@@ -470,7 +477,7 @@ function App() {
           </div>
         </div>
         <div className="online-status"><span className="status-dot" /> {onlineCount || '...'} online</div>
-        <div className="nav-status"><span className={`status-dot ${locationState}`} /> {locationState === 'inside' ? 'Inside 5 km zone' : '5 km CUCEK zone'} <ChevronDown size={15} /></div>
+        <div className="nav-status"><span className={`status-dot ${locationState}`} /> {locationState === 'owner' ? 'Owner access' : locationState === 'inside' ? 'Inside 5 km zone' : '5 km CUCEK zone'} <ChevronDown size={15} /></div>
         <button className="icon-button" aria-label="Help" title="Help"><CircleHelp size={20} /></button>
       </nav>
 

@@ -8,12 +8,7 @@ const rootDir = dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   plugins: [react()],
   build: {
-    rollupOptions: {
-      input: {
-        app: resolve(rootDir, 'index.html'),
-        vanillaCall: resolve(rootDir, 'vanilla-call.html'),
-      },
-    },
+    rollupOptions: { input: resolve(rootDir, 'index.html') },
   },
   server: {
     proxy: {

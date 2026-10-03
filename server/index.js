@@ -1,6 +1,9 @@
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
@@ -11,9 +14,12 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import { z } from 'zod';
 
 const PORT = Number(process.env.PORT || 4000);
+const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const distDirectory = resolve(projectRoot, 'dist');
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 const allowedOrigins = CLIENT_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean);
 const allowedOriginSet = new Set(allowedOrigins);
+const isLocalOrigin = (origin) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(origin);
 const JWT_SECRET = process.env.JWT_SECRET || 'local-development-secret-change-me';
 const RESERVED_DISPLAY_NAME = 'rakheesubinu kasim';
 const OWNER_NAME_PASSWORD = process.env.OWNER_NAME_PASSWORD;
@@ -107,6 +113,12 @@ function isInsideCucek(location) {
     && distanceInKilometres(CUCEK_CENTER, location) <= CUCEK_RADIUS_KM;
 }
 
+function hasOwnerAccess(displayName, ownerNamePassword) {
+  return Boolean(OWNER_NAME_PASSWORD)
+    && displayName.trim().toLowerCase() === RESERVED_DISPLAY_NAME
+    && ownerNamePassword === OWNER_NAME_PASSWORD;
+}
+
 function removeFromQueue(socketId) {
   if (!redis) {
     const index = waitingUsers.findIndex((user) => user.socketId === socketId);
@@ -181,16 +193,28 @@ async function broadcastOnlineCount() {
 const app = express();
 const corsOptions = {
   origin(origin, callback) {
-    if (!origin || allowedOriginSet.has(origin)) {
+    if (!origin || allowedOriginSet.has(origin) || (process.env.NODE_ENV !== 'production' && isLocalOrigin(origin))) {
       callback(null, true);
       return;
     }
-    callback(new Error('Origin is not allowed by CORS'));
+    callback(null, false);
   },
   credentials: true,
 };
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '32kb' }));
+if (existsSync(distDirectory)) {
+  app.use(express.static(distDirectory));
+  app.use((request, response, next) => {
+    if (request.method !== 'GET' || request.path.startsWith('/api') || request.path.startsWith('/socket.io')) {
+      next();
+      return;
+    }
+    response.sendFile(resolve(distDirectory, 'index.html'), (error) => {
+      if (error) next(error);
+    });
+  });
+}
 app.get('/api/health', (_request, response) => response.json({ ok: true, service: 'cucek-connect-server', redis: Boolean(redis), mongo: mongoose.connection.readyState === 1 }));
 app.post('/api/auth/anonymous', (request, response) => {
   const result = anonymousAuthSchema.safeParse(request.body || {});
@@ -237,15 +261,17 @@ io.on('connection', (socket) => {
       return;
     }
     const { interest, mode, displayName, location } = result.data;
-    if (displayName.trim().toLowerCase() === RESERVED_DISPLAY_NAME && result.data.ownerNamePassword !== OWNER_NAME_PASSWORD) {
+    const ownerAccess = hasOwnerAccess(displayName, result.data.ownerNamePassword);
+    if (displayName.trim().toLowerCase() === RESERVED_DISPLAY_NAME && !ownerAccess) {
       socket.emit('match-error', { message: 'That name is reserved. Enter the owner password to use it.' });
       return;
     }
     await removeFromQueue(socket.id);
-    if (!isInsideCucek(location)) {
+    if (!ownerAccess && !isInsideCucek(location)) {
       socket.emit('match-error', { message: `You must be within ${CUCEK_RADIUS_KM} km of CUCEK to match.` });
       return;
     }
+    socket.data.role = ownerAccess ? 'admin' : 'student';
     const candidate = await takeCandidate(interest, socket.id);
     if (!candidate) {
       await addToQueue({ socketId: socket.id, interest, mode, displayName, location });
