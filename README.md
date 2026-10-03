@@ -9,7 +9,7 @@ Anonymous, CUCEK-only video matching with a React frontend, Express/Socket.IO si
 3. Start frontend and signaling server: `npm run dev` (or `npm run dev:full`)
 4. Open `http://localhost:5173`.
 
-The display name `Rakheesubinu Kasim` is reserved on the server and requires `OWNER_NAME_PASSWORD=8289975284`. Set a different secret in `.env` before sharing a deployment.
+The display name `Rakheesubinu Kasim` is reserved on the server and requires the private `OWNER_NAME_PASSWORD` value from `.env`. Set a strong secret before sharing a deployment.
 
 Camera, microphone, and geolocation require `localhost` or HTTPS. The server validates the 5 km CUCEK geofence again; the browser check alone is not trusted.
 

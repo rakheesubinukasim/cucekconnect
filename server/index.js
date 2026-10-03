@@ -16,7 +16,7 @@ const allowedOrigins = CLIENT_ORIGIN.split(',').map((origin) => origin.trim()).f
 const allowedOriginSet = new Set(allowedOrigins);
 const JWT_SECRET = process.env.JWT_SECRET || 'local-development-secret-change-me';
 const RESERVED_DISPLAY_NAME = 'rakheesubinu kasim';
-const OWNER_NAME_PASSWORD = process.env.OWNER_NAME_PASSWORD || '8289975284';
+const OWNER_NAME_PASSWORD = process.env.OWNER_NAME_PASSWORD;
 const redisEnabled = Boolean(process.env.REDIS_URL);
 const CUCEK_RADIUS_KM = 5;
 const CUCEK_CENTER = { latitude: 9.4604, longitude: 76.4379 };
