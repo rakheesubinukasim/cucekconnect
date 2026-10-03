@@ -1,0 +1,33 @@
+{
+  "name": "cucek-connect",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently --kill-others-on-fail \"npm run server\" \"vite\"",
+    "server": "node server/index.js",
+    "dev:full": "npm run dev",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "concurrently": "latest",
+    "cors": "latest",
+    "dotenv": "latest",
+    "express": "latest",
+    "firebase": "^12.19.0",
+    "ioredis": "latest",
+    "jsonwebtoken": "latest",
+    "lucide-react": "latest",
+    "mongodb": "^7.6.0",
+    "mongoose": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "@socket.io/redis-adapter": "latest",
+    "socket.io": "latest",
+    "socket.io-client": "latest",
+    "vite": "latest",
+    "zod": "latest"
+  }
+}
