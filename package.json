@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "node node_modules/concurrently/dist/bin/concurrently.js --kill-others-on-fail \"npm run server\" \"npm run client\"",
+    "dev": "node scripts/dev.js",
     "client": "node node_modules/vite/bin/vite.js",
     "server": "node server/index.js",
     "dev:full": "npm run dev",

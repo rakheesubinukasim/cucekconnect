@@ -9,6 +9,8 @@ Anonymous, CUCEK-only video matching with a React frontend, Express/Socket.IO si
 3. Start frontend and signaling server: `npm run dev` (or `npm run dev:full`)
 4. Open `http://localhost:5173`.
 
+The development command is safe to run again while the app is already running; it reuses services on ports 4000 and 5173 instead of starting duplicate processes.
+
 For a single-server deployment, run `npm start`. This builds the React app and serves the frontend, API, and Socket.IO signaling server from `PORT` (default `4000`). Set `CLIENT_ORIGIN` to the public HTTPS origin and configure the deployment platform to run `npm start`.
 
 The display name `Rakheesubinu Kasim` is reserved on the server and requires the private `OWNER_NAME_PASSWORD` value from `.env`. The verified owner name and password receive admin role and bypass the 5 km location boundary; every other account must be within 5 km of CUCEK. Set a strong secret before sharing a deployment.
