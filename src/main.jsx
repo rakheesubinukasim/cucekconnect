@@ -31,7 +31,7 @@ const interests = ['Tech talk', 'Music', 'Campus life', 'Gaming', 'Projects'];
 const CUCEK_RADIUS_KM = 5;
 const CUCEK_CENTER = { latitude: 9.4604, longitude: 76.4379 };
 const RESERVED_DISPLAY_NAME = 'rakheesubinu kasim';
-const FALLBACK_ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+const FALLBACK_ICE_SERVERS = [{ urls: 'stun:13.127.200.56:3478' }];
 
 function distanceInKilometres(first, second) {
   const earthRadius = 6371;
@@ -65,7 +65,7 @@ function App() {
   const socketRef = useRef(null);
   const peerConnectionRef = useRef(null);
   const tokenRef = useRef(localStorage.getItem('cucek_token'));
-  const iceServersRef = useRef([{ urls: 'stun:stun.l.google.com:19302' }]);
+  const iceServersRef = useRef(FALLBACK_ICE_SERVERS);
   const pendingCandidatesRef = useRef([]);
   const iceRestartedRef = useRef(false);
   const chatMessagesRef = useRef(null);
@@ -190,9 +190,13 @@ function App() {
     peerIdRef.current = peerId;
     initiatorRef.current = initiator;
     setRemoteVideoReady(false);
-    const peerConnection = new RTCPeerConnection({ iceServers: iceServersRef.current });
+    const configuration = { iceServers: iceServersRef.current };
+    const peerConnection = new RTCPeerConnection(configuration);
     peerConnectionRef.current = peerConnection;
     pendingCandidatesRef.current = [];
+    peerConnection.onicegatheringstatechange = () => {
+      console.log('ICE Gathering State:', peerConnection.iceGatheringState);
+    };
     mediaStreamRef.current?.getTracks().forEach((track) => peerConnection.addTrack(track, mediaStreamRef.current));
     peerConnection.ontrack = (event) => {
       if (!remoteStreamRef.current) remoteStreamRef.current = new MediaStream();

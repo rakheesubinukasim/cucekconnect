@@ -24,7 +24,7 @@ The API issues anonymous 12-hour JWTs at `POST /api/auth/anonymous`. Reports req
 Video sessions use the built-in Socket.IO/WebRTC signaling path. Configure one public TURN server in `.env` for users behind restrictive NATs:
 
 ```env
-STUN_URL=stun:stun.l.google.com:19302
+STUN_URL=stun:13.127.200.56:3478
 VITE_SERVER_URL=turn:your-turn-server.example:3478
 VITE_TURN_USERNAME=your_turn_username
 VITE_TURN_PASSWORD=your_turn_password
