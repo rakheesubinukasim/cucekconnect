@@ -25,9 +25,9 @@ Video sessions use the built-in Socket.IO/WebRTC signaling path. Configure one p
 
 ```env
 STUN_URL=stun:stun.l.google.com:19302
-TURN_URL=turn:your-turn-server.example:3478
-TURN_USERNAME=your_turn_username
-TURN_CREDENTIAL=your_turn_credential
+VITE_SERVER_URL=turn:your-turn-server.example:3478
+VITE_TURN_USERNAME=your_turn_username
+VITE_TURN_PASSWORD=your_turn_password
 ```
 
 The backend exposes these ICE servers through the authenticated `/api/webrtc-config` route. TURN credentials stay server-side and are never compiled into the frontend.
@@ -45,7 +45,7 @@ In MongoDB Atlas, add the development machine's IP address under Network Access 
 
 ### Public WebRTC access
 
-The relay warning means direct ICE failed. For users on different networks, configure the TURN server values in `.env`; STUN alone is not sufficient. Set `CLIENT_ORIGIN` to the exact public HTTPS frontend origin, deploy the Node server on a public HTTPS/WSS-capable host, and configure the frontend proxy or production API URL to reach that server. Do not use `*` with credentialed CORS.
+The relay warning means direct ICE failed. For users on different networks, configure `VITE_SERVER_URL`, `VITE_TURN_USERNAME`, and `VITE_TURN_PASSWORD` in `.env`; STUN alone is not sufficient. Set `CLIENT_ORIGIN` to the exact public HTTPS frontend origin, deploy the Node server on a public HTTPS/WSS-capable host, and configure the frontend proxy or production API URL to reach that server. Do not use `*` with credentialed CORS.
 
 ## Production shape
 

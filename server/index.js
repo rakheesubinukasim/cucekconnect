@@ -28,8 +28,12 @@ const CUCEK_RADIUS_KM = 5;
 const CUCEK_CENTER = { latitude: 9.4604, longitude: 76.4379 };
 const fallbackIceServers = [
   { urls: process.env.STUN_URL || 'stun:stun.l.google.com:19302' },
-  ...(process.env.TURN_URL && process.env.TURN_USERNAME && process.env.TURN_CREDENTIAL
-    ? [{ urls: process.env.TURN_URL, username: process.env.TURN_USERNAME, credential: process.env.TURN_CREDENTIAL }]
+  ...(process.env.VITE_SERVER_URL && process.env.VITE_TURN_USERNAME && process.env.VITE_TURN_PASSWORD
+    ? [{
+      urls: process.env.VITE_SERVER_URL,
+      username: process.env.VITE_TURN_USERNAME,
+      credential: process.env.VITE_TURN_PASSWORD,
+    }]
     : []),
 ];
 let cachedIceServers = null;
