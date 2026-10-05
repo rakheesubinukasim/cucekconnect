@@ -328,7 +328,8 @@ io.on('connection', (socket) => {
 
 async function start() {
   if (redis) {
-    await Promise.all([redis.connect(), redisPub.connect(), redisSub.connect()]);
+    const redis=new Redis(process.env.REDIS_URL, { lazyConnect: true});
+    await redis.connect();
     console.log('Redis connected; multi-instance mode enabled');
   }
   if (process.env.MONGODB_URI) {
