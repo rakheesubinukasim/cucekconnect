@@ -24,14 +24,44 @@ import {
   Volume2,
   X,
   MapPin,
+  Maximize2,
+  Minimize2,
+  SwitchCamera,
+  UserRound,
 } from 'lucide-react';
 import './styles.css';
 
 const interests = ['Tech talk', 'Music', 'Campus life', 'Gaming', 'Projects'];
 const CUCEK_RADIUS_KM = 5;
 const CUCEK_CENTER = { latitude: 9.4604, longitude: 76.4379 };
-const RESERVED_DISPLAY_NAME = 'rakheesubinu kasim';
+const OWNER_DISPLAY_NAME = 'rakheesubinukasim';
+const MINIMUM_RESERVED_NAME_LENGTH = 'rakhee'.length;
 const FALLBACK_ICE_SERVERS = [{ urls: 'stun:13.127.200.56:3478' }];
+
+function isReservedDisplayName(name) {
+  const normalizedName = name.trim().toLowerCase().replace(/\s+/g, '');
+  return normalizedName.length >= MINIMUM_RESERVED_NAME_LENGTH && OWNER_DISPLAY_NAME.startsWith(normalizedName);
+}
+
+function getSkyState(date = new Date()) {
+  const minutes = date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60;
+  const progress = minutes / (24 * 60);
+  const daylight = minutes >= 360 && minutes < 18 * 60;
+  const arc = Math.sin(((minutes - 360) / (12 * 60)) * Math.PI);
+  const horizontal = daylight
+    ? ((minutes - 360) / (12 * 60)) * 100
+    : minutes >= 18 * 60
+      ? 92 - ((minutes - 18 * 60) / (12 * 60)) * 100
+      : -8 + (minutes / (6 * 60)) * 100;
+  return {
+    daylight,
+    label: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    style: {
+      '--celestial-x': `${Math.max(-8, Math.min(92, horizontal))}%`,
+      '--celestial-y': `${daylight ? 13 + (1 - Math.max(0, arc)) * 28 : 18 + (1 - Math.max(0, Math.sin(progress * Math.PI))) * 26}%`,
+    },
+  };
+}
 
 function distanceInKilometres(first, second) {
   const earthRadius = 6371;
@@ -42,15 +72,18 @@ function distanceInKilometres(first, second) {
 }
 
 function App() {
+  const [skyState, setSkyState] = useState(() => getSkyState());
   const [mode, setMode] = useState('video');
   const [displayName, setDisplayName] = useState(() => localStorage.getItem('cucek_display_name') || '');
   const [partnerName, setPartnerName] = useState('CUCEK student');
   const [showNamePrompt, setShowNamePrompt] = useState(false);
+  const [editingName, setEditingName] = useState(false);
   const [selectedInterest, setSelectedInterest] = useState('Tech talk');
   const [isMatching, setIsMatching] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [micOn, setMicOn] = useState(true);
   const [cameraOn, setCameraOn] = useState(true);
+  const [facingMode, setFacingMode] = useState('user');
   const [showSafety, setShowSafety] = useState(false);
   const [locationState, setLocationState] = useState('unknown');
   const [permissionMessage, setPermissionMessage] = useState('');
@@ -58,8 +91,10 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [draftMessage, setDraftMessage] = useState('');
   const [remoteVideoReady, setRemoteVideoReady] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const matchCardRef = useRef(null);
   const mediaStreamRef = useRef(null);
   const locationRef = useRef(null);
   const socketRef = useRef(null);
@@ -79,6 +114,18 @@ function App() {
     socketRef.current?.disconnect();
     peerConnectionRef.current?.close();
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+  }, []);
+
+  useEffect(() => {
+    const updateSky = () => setSkyState(getSkyState());
+    const timer = window.setInterval(updateSky, 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const syncFullscreenState = () => setIsFullscreen(document.fullscreenElement === matchCardRef.current);
+    document.addEventListener('fullscreenchange', syncFullscreenState);
+    return () => document.removeEventListener('fullscreenchange', syncFullscreenState);
   }, []);
 
   useEffect(() => {
@@ -116,12 +163,12 @@ function App() {
     }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
   });
 
-  const requestMedia = async (requestedMode = mode) => {
+  const requestMedia = async (requestedMode = mode, requestedFacingMode = facingMode) => {
     if (requestedMode === 'text') return;
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera and microphone access is unavailable. Use HTTPS or localhost.');
     let stream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: requestedFacingMode }, audio: true });
     } catch (error) {
       const messages = { NotAllowedError: 'Camera and microphone access was denied. Allow both permissions and try again.', NotFoundError: 'No camera or microphone was found on this device.', NotReadableError: 'Your camera or microphone is already in use by another app.', SecurityError: 'Camera and microphone require HTTPS or localhost.' };
       throw new Error(messages[error.name] || 'Could not access your camera and microphone.');
@@ -131,6 +178,16 @@ function App() {
     setCameraOn(stream.getVideoTracks().some((track) => track.enabled));
     setMicOn(stream.getAudioTracks().some((track) => track.enabled));
     if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+  };
+
+  const toggleFullscreen = async () => {
+    if (!matchCardRef.current) return;
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await matchCardRef.current.requestFullscreen();
+    } catch (error) {
+      setPermissionMessage(`Fullscreen is unavailable in this browser (${error.name || 'unsupported'}).`);
+    }
   };
 
   const loadIceServers = async () => {
@@ -392,9 +449,9 @@ function App() {
   };
 
   const startMatching = async (nameOverride = displayName, ownerNamePassword = '') => {
-    const normalizedName = nameOverride.trim().toLowerCase();
-    const ownerAccess = normalizedName === RESERVED_DISPLAY_NAME && ownerNamePassword.trim().length > 0;
-    if (!nameOverride.trim() || (normalizedName === RESERVED_DISPLAY_NAME && !ownerNamePassword)) {
+    const ownerName = isReservedDisplayName(nameOverride);
+    const ownerAccess = ownerName && ownerNamePassword.trim().length > 0;
+    if (!nameOverride.trim() || (ownerName && !ownerNamePassword)) {
       setShowNamePrompt(true);
       return;
     }
@@ -455,7 +512,19 @@ function App() {
     const password = formData.get('ownerNamePassword')?.toString() || '';
     if (name.length < 1 || name.length > 32) return;
     setShowNamePrompt(false);
+    if (editingName) {
+      setDisplayName(name);
+      localStorage.setItem('cucek_display_name', name);
+      setEditingName(false);
+      setPermissionMessage('Username updated. It will be shown on your next connection.');
+      return;
+    }
     startMatching(name, password);
+  };
+
+  const openNameEditor = () => {
+    setEditingName(true);
+    setShowNamePrompt(true);
   };
 
   const toggleMic = () => {
@@ -470,8 +539,53 @@ function App() {
     setCameraOn(nextValue);
   };
 
+  const switchCamera = async () => {
+    if (!mediaStreamRef.current || !peerConnectionRef.current) return;
+    const nextFacingMode = facingMode === 'user' ? 'environment' : 'user';
+    let replacementStream;
+    try {
+      replacementStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: nextFacingMode } }, audio: false });
+      const replacementTrack = replacementStream.getVideoTracks()[0];
+      const sender = peerConnectionRef.current.getSenders().find((item) => item.track?.kind === 'video');
+      if (!replacementTrack || !sender) throw new Error('No active camera track is available.');
+      await sender.replaceTrack(replacementTrack);
+      mediaStreamRef.current.getVideoTracks().forEach((track) => {
+        mediaStreamRef.current.removeTrack(track);
+        track.stop();
+      });
+      mediaStreamRef.current.addTrack(replacementTrack);
+      if (localVideoRef.current) localVideoRef.current.srcObject = mediaStreamRef.current;
+      setFacingMode(nextFacingMode);
+      setCameraOn(true);
+      setPermissionMessage('');
+    } catch (error) {
+      replacementStream?.getTracks().forEach((track) => track.stop());
+      const message = error.name === 'OverconstrainedError'
+        ? 'This device does not provide a front and back camera.'
+        : error.name === 'NotAllowedError'
+          ? 'Camera access was denied. Allow camera permission to switch views.'
+          : error.message;
+      setPermissionMessage(message || 'Could not switch the camera.');
+    }
+  };
+
   return (
     <main className="app-shell">
+      <div className={`riverside-scene ${skyState.daylight ? 'daylight' : 'nighttime'}`} style={skyState.style} aria-label={`Riverside sky, ${skyState.label}`}>
+        <div className="celestial-body"><span className="sun-core" /><span className="moon-core" /></div>
+        <div className="coconut-tree">
+          <div className="tree-trunk" />
+          <div className="tree-crown">
+            <i /><i /><i /><i /><i /><i />
+          </div>
+        </div>
+        <div className="far-bank" />
+        <div className="river">
+          <span /><span /><span /><span /><span />
+        </div>
+        <div className="shoreline" />
+        <div className="fireflies"><i /><i /><i /><i /><i /></div>
+      </div>
       <nav className="topbar">
         <div className="brand-lockup">
           <div className="brand-mark"><Radio size={19} strokeWidth={2.4} /></div>
@@ -482,6 +596,7 @@ function App() {
         </div>
         <div className="online-status"><span className="status-dot" /> {onlineCount || '...'} online</div>
         <div className="nav-status"><span className={`status-dot ${locationState}`} /> {locationState === 'owner' ? 'Owner access' : locationState === 'inside' ? 'Inside 5 km zone' : '5 km CUCEK zone'} <ChevronDown size={15} /></div>
+        <button className="user-name-button" onClick={openNameEditor} aria-label={displayName ? `Change username, currently ${displayName}` : 'Set username'} title="Change username"><UserRound size={15} /><span>{displayName || 'Set username'}</span></button>
         <button className="icon-button" aria-label="Help" title="Help"><CircleHelp size={20} /></button>
       </nav>
 
@@ -505,7 +620,7 @@ function App() {
           <button className="safety-link" onClick={() => setShowSafety(true)}><Info size={15} /> How safety works</button>
         </aside>
 
-        <section className="match-card">
+        <section ref={matchCardRef} className="match-card">
           <div className="card-topline"><span className="live-pill"><span /> LIVE MATCHING</span><span className="card-count">{isConnected ? '01' : '01'} / 01</span></div>
           <div className="mode-tabs" role="tablist">
             <button disabled={isMatching} className={mode === 'video' ? 'active' : ''} onClick={() => (isConnected ? applyMode('video') : setMode('video'))}><Video size={17} /> Video</button>
@@ -514,25 +629,24 @@ function App() {
 
           <div className={`video-stage ${isConnected ? 'connected' : ''} ${mode === 'text' ? 'text-stage' : ''}`}>
             <div className="stage-grid" />
+            {mode === 'video' && <button className="fullscreen-button" onClick={toggleFullscreen} aria-label={isFullscreen ? 'Exit fullscreen video' : 'Open fullscreen video'} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen video'}>{isFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>}
             {!isConnected && !isMatching && <div className="stage-idle"><div className="idle-orbit"><Sparkles size={25} /></div><strong>Ready when you are</strong><span>Find a fellow CUCEK student<br />who is up for a chat.</span></div>}
             {isMatching && <div className="stage-idle searching"><div className="search-ring"><Radio size={24} /></div><strong>Finding your next connection</strong><span>Looking for someone who chose<br />{selectedInterest.toLowerCase()}.</span></div>}
             {isConnected && mode === 'video' && <><div className="remote-video"><video className={remoteVideoReady ? 'has-video' : ''} ref={remoteVideoRef} onLoadedMetadata={() => { setRemoteVideoReady(true); remoteVideoRef.current?.play().catch(() => {}); }} autoPlay playsInline /><div className={`avatar-large ${remoteVideoReady ? 'hidden' : ''}`}>{partnerName.charAt(0).toUpperCase()}</div><span className="remote-label"><span className="tiny-dot" /> {partnerName}</span><button className="remote-more"><MoreHorizontal size={16} /></button></div><div className="self-video"><video ref={localVideoRef} autoPlay muted playsInline /><div className="self-avatar">You</div><span className="self-label">{displayName}</span></div><div className="connection-badge"><span /> Connected securely</div></>}
             {isConnected && mode === 'text' && <div className="chat-panel"><div className="chat-header"><span><MessageCircle size={16} /> Private text chat</span><span className="chat-online"><span className="tiny-dot" /> Connected</span></div><div className="chat-messages" ref={chatMessagesRef}>{messages.length === 0 && <div className="chat-empty">Say hello. Your conversation is anonymous.</div>}{messages.map((item, index) => <div className={`chat-bubble ${item.own ? 'own' : ''}`} key={`${item.sentAt}-${index}`}>{item.message}</div>)}</div><form className="chat-composer" onSubmit={sendMessage}><input aria-label="Message" value={draftMessage} onChange={(event) => setDraftMessage(event.target.value)} maxLength={1000} placeholder="Write a message..." /><button type="submit" aria-label="Send message" title="Send message"><Send size={17} /></button></form></div>}
           </div>
 
-          <div className="interest-row"><span className="field-label">I want to talk about</span><div className="interest-options">{interests.map((interest) => <button key={interest} className={selectedInterest === interest ? 'chosen' : ''} onClick={() => setSelectedInterest(interest)}>{interest}</button>)}</div></div>
-
           {permissionMessage && <div className={`permission-message ${locationState}`}><MapPin size={16} /><span>{permissionMessage}</span></div>}
           <div className="match-actions">
             {isConnected ? <><button className="control-button danger" onClick={stopCall} aria-label="End conversation" title="End conversation"><PhoneOff size={18} /></button><button className="primary-button next" onClick={nextPerson}>Next person <ArrowRight size={18} /></button></> : isMatching ? <button className="primary-button cancel-matching" onClick={cancelMatching} aria-label="Cancel matching"><Radio size={18} /> Cancel matching</button> : <button type="button" className="primary-button start-matching" onClick={() => startMatching()} aria-label="Start matching"><ArrowRight size={19} /> Start matching</button>}
           </div>
-          {isConnected && mode === 'video' && <div className="call-controls"><button className={`control-button ${!micOn ? 'off' : ''}`} onClick={toggleMic}>{micOn ? <Mic size={17} /> : <Mic size={17} />}</button><button className={`control-button ${!cameraOn ? 'off' : ''}`} onClick={toggleCamera}>{cameraOn ? <Camera size={17} /> : <VideoOff size={17} />}</button><button className="control-button"><Volume2 size={17} /></button><button className="report-button"><Flag size={15} /> Report</button></div>}
+          {isConnected && mode === 'video' && <div className="call-controls"><button className={`control-button ${!micOn ? 'off' : ''}`} onClick={toggleMic} aria-label={micOn ? 'Mute microphone' : 'Unmute microphone'} title={micOn ? 'Mute microphone' : 'Unmute microphone'}>{micOn ? <Mic size={17} /> : <Mic size={17} />}</button><button className={`control-button ${!cameraOn ? 'off' : ''}`} onClick={toggleCamera} aria-label={cameraOn ? 'Turn camera off' : 'Turn camera on'} title={cameraOn ? 'Turn camera off' : 'Turn camera on'}>{cameraOn ? <Camera size={17} /> : <VideoOff size={17} />}</button><button className="control-button" onClick={switchCamera} aria-label={`Switch to ${facingMode === 'user' ? 'back' : 'front'} camera`} title={`Switch to ${facingMode === 'user' ? 'back' : 'front'} camera`}><SwitchCamera size={17} /></button><button className="control-button"><Volume2 size={17} /></button><button className="report-button"><Flag size={15} /> Report</button></div>}
           <p className="match-footnote"><ShieldCheck size={14} /> Moderated space · Be kind, be real, be respectful</p>
         </section>
       </section>
 
       <footer className="footer-bar"><span>CUCEK Connect <b>·</b> Built for the campus community</span><span className="footer-links"><button>Community guidelines</button><button>Privacy</button><button>Feedback</button></span></footer>
-      {showNamePrompt && <div className="modal-backdrop"><form className="name-modal" onSubmit={confirmName}><div className="modal-icon"><MessageCircle size={23} /></div><h2>Choose your name</h2><p>This is the name the other student will see. You can use a nickname.</p><label htmlFor="display-name">Your name</label><input id="display-name" name="displayName" defaultValue={displayName} autoFocus maxLength={32} required placeholder="e.g. Anu" /><label htmlFor="owner-name-password">Owner password (only for Rakheesubinu Kasim)</label><input id="owner-name-password" name="ownerNamePassword" type="password" inputMode="numeric" maxLength={128} placeholder="Leave blank for another name" /><button className="primary-button modal-button" type="submit">Continue to matching <ArrowRight size={17} /></button></form></div>}
+      {showNamePrompt && <div className="modal-backdrop"><form className="name-modal" onSubmit={confirmName}><div className="modal-icon"><MessageCircle size={23} /></div><h2>{editingName ? 'Change your username' : 'Choose your name'}</h2><p>{editingName ? 'Update the name shown on your profile label. This change applies to your next connection.' : 'This is the name the other student will see. You can use a nickname.'}</p><label htmlFor="display-name">Your name</label><input key={editingName ? 'edit-name' : 'new-name'} id="display-name" name="displayName" defaultValue={displayName} autoFocus maxLength={32} required placeholder="e.g. Anu" /><label htmlFor="owner-name-password">Owner password (for names starting with Rakhee)</label><input id="owner-name-password" name="ownerNamePassword" type="password" inputMode="numeric" maxLength={128} placeholder="Only needed for an owner name" /><button className="primary-button modal-button" type="submit">{editingName ? 'Save username' : 'Continue to matching'} {editingName ? <Check size={17} /> : <ArrowRight size={17} />}</button></form></div>}
       {showSafety && <div className="modal-backdrop" onClick={() => setShowSafety(false)}><div className="safety-modal" onClick={(event) => event.stopPropagation()}><button className="close-modal" onClick={() => setShowSafety(false)} aria-label="Close"><X size={18} /></button><div className="modal-icon"><ShieldCheck size={23} /></div><h2>Designed for a safer campus</h2><p>Every session stays anonymous by default. Automated safety signals watch for harmful content, while quick report and skip controls keep you in charge.</p><div className="modal-rule"><Check size={16} /> CUCEK location boundary</div><div className="modal-rule"><Check size={16} /> No recording by default</div><div className="modal-rule"><Check size={16} /> Fast human review path</div><button className="primary-button modal-button" onClick={() => setShowSafety(false)}>Got it</button></div></div>}
     </main>
   );

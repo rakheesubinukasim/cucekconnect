@@ -21,7 +21,8 @@ const allowedOrigins = CLIENT_ORIGIN.split(',').map((origin) => origin.trim()).f
 const allowedOriginSet = new Set(allowedOrigins);
 const isLocalOrigin = (origin) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(origin);
 const JWT_SECRET = process.env.JWT_SECRET || 'local-development-secret-change-me';
-const RESERVED_DISPLAY_NAME = 'rakheesubinu kasim';
+const OWNER_DISPLAY_NAME = 'rakheesubinukasim';
+const MINIMUM_RESERVED_NAME_LENGTH = 'rakhee'.length;
 const OWNER_NAME_PASSWORD = process.env.OWNER_NAME_PASSWORD;
 const redisEnabled = Boolean(process.env.REDIS_URL);
 const CUCEK_RADIUS_KM = 5;
@@ -117,9 +118,14 @@ function isInsideCucek(location) {
     && distanceInKilometres(CUCEK_CENTER, location) <= CUCEK_RADIUS_KM;
 }
 
+function isReservedDisplayName(displayName) {
+  const normalizedName = displayName.trim().toLowerCase().replace(/\s+/g, '');
+  return normalizedName.length >= MINIMUM_RESERVED_NAME_LENGTH && OWNER_DISPLAY_NAME.startsWith(normalizedName);
+}
+
 function hasOwnerAccess(displayName, ownerNamePassword) {
   return Boolean(OWNER_NAME_PASSWORD)
-    && displayName.trim().toLowerCase() === RESERVED_DISPLAY_NAME
+    && isReservedDisplayName(displayName)
     && ownerNamePassword === OWNER_NAME_PASSWORD;
 }
 
@@ -266,7 +272,7 @@ io.on('connection', (socket) => {
     }
     const { interest, mode, displayName, location } = result.data;
     const ownerAccess = hasOwnerAccess(displayName, result.data.ownerNamePassword);
-    if (displayName.trim().toLowerCase() === RESERVED_DISPLAY_NAME && !ownerAccess) {
+    if (isReservedDisplayName(displayName) && !ownerAccess) {
       socket.emit('match-error', { message: 'That name is reserved. Enter the owner password to use it.' });
       return;
     }
