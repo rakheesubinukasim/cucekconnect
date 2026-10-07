@@ -544,26 +544,66 @@ function App() {
     const nextFacingMode = facingMode === 'user' ? 'environment' : 'user';
     let replacementStream;
     try {
-      replacementStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: nextFacingMode } }, audio: false });
+      const currentTrack = mediaStreamRef.current.getVideoTracks()[0];
+      const currentDeviceId = currentTrack?.getSettings?.().deviceId;
+      const cameraRequest = { video: { facingMode: { ideal: nextFacingMode } }, audio: false };
+
+      try {
+        replacementStream = await navigator.mediaDevices.getUserMedia(cameraRequest);
+        const replacementTrack = replacementStream.getVideoTracks()[0];
+        const replacementDeviceId = replacementTrack?.getSettings?.().deviceId;
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const hasAnotherCamera = devices.filter((device) => device.kind === 'videoinput').length > 1;
+        if (hasAnotherCamera && currentDeviceId && replacementDeviceId === currentDeviceId) {
+          replacementStream.getTracks().forEach((track) => track.stop());
+          replacementStream = null;
+          const alternateCamera = devices.find((device) => device.kind === 'videoinput' && device.deviceId !== currentDeviceId);
+          if (alternateCamera) {
+            replacementStream = await navigator.mediaDevices.getUserMedia({
+              video: { deviceId: { exact: alternateCamera.deviceId } },
+              audio: false,
+            });
+          }
+        }
+      } catch (error) {
+        if (!['OverconstrainedError', 'NotFoundError', 'NotReadableError'].includes(error.name)) throw error;
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const alternateCameras = devices.filter((device) => device.kind === 'videoinput' && device.deviceId !== currentDeviceId);
+        for (const device of alternateCameras) {
+          try {
+            replacementStream = await navigator.mediaDevices.getUserMedia({
+              video: { deviceId: { exact: device.deviceId } },
+              audio: false,
+            });
+            break;
+          } catch (deviceError) {
+            if (!['OverconstrainedError', 'NotFoundError', 'NotReadableError'].includes(deviceError.name)) throw deviceError;
+          }
+        }
+        if (!replacementStream) throw error;
+      }
+
       const replacementTrack = replacementStream.getVideoTracks()[0];
       const sender = peerConnectionRef.current.getSenders().find((item) => item.track?.kind === 'video');
       if (!replacementTrack || !sender) throw new Error('No active camera track is available.');
       await sender.replaceTrack(replacementTrack);
-      mediaStreamRef.current.getVideoTracks().forEach((track) => {
-        mediaStreamRef.current.removeTrack(track);
-        track.stop();
-      });
-      mediaStreamRef.current.addTrack(replacementTrack);
+      replacementTrack.enabled = cameraOn;
+      const audioTracks = mediaStreamRef.current.getAudioTracks();
+      const previousVideoTracks = mediaStreamRef.current.getVideoTracks();
+      mediaStreamRef.current = new MediaStream([...audioTracks, replacementTrack]);
+      previousVideoTracks.forEach((track) => track.stop());
+      replacementStream.getTracks().filter((track) => track !== replacementTrack).forEach((track) => track.stop());
       if (localVideoRef.current) localVideoRef.current.srcObject = mediaStreamRef.current;
       setFacingMode(nextFacingMode);
-      setCameraOn(true);
       setPermissionMessage('');
     } catch (error) {
       replacementStream?.getTracks().forEach((track) => track.stop());
-      const message = error.name === 'OverconstrainedError'
+      const message = error.name === 'OverconstrainedError' || error.name === 'NotFoundError'
         ? 'This device does not provide a front and back camera.'
         : error.name === 'NotAllowedError'
           ? 'Camera access was denied. Allow camera permission to switch views.'
+          : error.name === 'NotReadableError'
+            ? 'The camera is unavailable. Close other apps using it and try again.'
           : error.message;
       setPermissionMessage(message || 'Could not switch the camera.');
     }
@@ -602,8 +642,8 @@ function App() {
 
       <section className="hero-grid">
         <aside className="intro-column">
-          <div className="eyebrow"><span className="eyebrow-line" /> OWNER RAKHEESUBINU KASIM (IT) </div>
-          <h1>(TESTING PHASE)  Meet someone<br /><em>from your campus.</em></h1>
+          <div className="eyebrow"><span className="eyebrow-line" /> FOUNDER RAKHEESUBINU KASIM (IT) </div>
+          <h1> Meet  someone<br /><em>from your campus.</em></h1>
           <p className="intro-copy">A calm corner for spontaneous conversations at Cochin University College of Engineering Kuttanad.</p>
 
           <div className="privacy-note">
