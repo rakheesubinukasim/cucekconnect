@@ -263,7 +263,7 @@ if (existsSync(distDirectory)) {
     });
   });
 }
-app.get('/api/health', (_request, response) => response.json({ ok: true, service: 'cucek-connect-server', redis: Boolean(redis), mongo: mongoose.connection.readyState === 1 }));
+app.get('/api/health', (_request, response) => response.json({ ok: true, service: 'cusat-connect-server', redis: Boolean(redis), mongo: mongoose.connection.readyState === 1 }));
 app.post('/api/auth/anonymous', (request, response) => {
   const result = anonymousAuthSchema.safeParse(request.body || {});
   if (!result.success) return response.status(400).json({ error: 'Invalid anonymous profile', details: result.error.flatten() });
@@ -380,7 +380,7 @@ async function start() {
   } else {
     console.log('MONGODB_URI not set; reports will not be persisted.');
   }
-  httpServer.listen(PORT, () => console.log(`CUCEK Connect server listening on http://localhost:${PORT}`));
+  httpServer.listen(PORT, () => console.log(`CUSAT Connect server listening on http://localhost:${PORT}`));
 }
 
 start();

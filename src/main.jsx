@@ -606,7 +606,7 @@ function App() {
 
       <section className="hero-grid">
         <aside className="intro-column">
-          <div className="eyebrow"><span className="eyebrow-line" /> FOUNDER RAKHEESUBINU KASIM (CUCEK-IT) </div>
+          <div className="eyebrow"><span className="eyebrow-line" /><span>FOUNDER<br />RAKHEESUBINU KASIM (CUCEK-IT)</span></div>
           <h1> Meet  someone<br /><em>from your campus.</em></h1>
           <p className="intro-copy">A calm corner for spontaneous conversations at CUCEK AND CUSAT.</p>
 

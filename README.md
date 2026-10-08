@@ -1,4 +1,4 @@
-# CUCEK Connect
+# CUSAT Connect
 
 Anonymous video matching with a React frontend, Express/Socket.IO signaling server, WebRTC media, JWT sessions, optional Redis active-session storage, and MongoDB report persistence. Users within 15 km of either CUCEK or CUSAT can join, and each video connection lasts three minutes before the next person is matched automatically.
 
