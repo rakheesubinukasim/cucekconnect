@@ -1,6 +1,6 @@
 # CUCEK Connect
 
-Anonymous, CUCEK-only video matching with a React frontend, Express/Socket.IO signaling server, WebRTC media, JWT sessions, optional Redis active-session storage, and MongoDB report persistence.
+Anonymous video matching with a React frontend, Express/Socket.IO signaling server, WebRTC media, JWT sessions, optional Redis active-session storage, and MongoDB report persistence. Users within 15 km of either CUCEK or CUSAT can join, and each video connection lasts three minutes before the next person is matched automatically.
 
 ## Run locally
 
@@ -13,9 +13,9 @@ The development command is safe to run again while the app is already running; i
 
 For a single-server deployment, run `npm start`. This builds the React app and serves the frontend, API, and Socket.IO signaling server from `PORT` (default `4000`). Set `CLIENT_ORIGIN` to the public HTTPS origin and configure the deployment platform to run `npm start`.
 
-The display name `Rakheesubinu Kasim` is reserved on the server and requires the private `OWNER_NAME_PASSWORD` value from `.env`. The verified owner name and password receive admin role and bypass the 5 km location boundary; every other account must be within 5 km of CUCEK. Set a strong secret before sharing a deployment.
+The display name `Rakheesubinu Kasim` is reserved on the server and requires the private `OWNER_NAME_PASSWORD` value from `.env`. Set a strong secret before sharing a deployment.
 
-Camera, microphone, and geolocation require `localhost` or HTTPS. The server validates the 5 km CUCEK geofence again; the browser check alone is not trusted.
+Camera, microphone, and geolocation require `localhost` or HTTPS. The server validates that users are within 15 km of either CUCEK or CUSAT.
 
 The API issues anonymous 12-hour JWTs at `POST /api/auth/anonymous`. Reports require `Authorization: Bearer <token>`. Socket.IO requires the same token in the handshake auth payload. Redis is optional locally and is used for active-session TTLs when configured.
 
@@ -51,15 +51,16 @@ The relay warning means direct ICE failed. For users on different networks, conf
 
 Host the React build on a static host/CDN, run `server/index.js` on a Node-capable service, use MongoDB Atlas for persistence, and configure a TURN server for users behind restrictive NATs. Set `CLIENT_ORIGIN` to the deployed frontend origin.
 
-### 500+ concurrent users
+### 2,000+ concurrent users
 
-The browser handles media through WebRTC, while the Node server handles authentication, matching, chat, and signaling. For 500+ concurrent users:
+The browser handles media through WebRTC, while the Node server handles authentication, matching, and signaling. For 2,000+ concurrent users:
 
 1. Use a managed Redis instance and set `REDIS_URL`. Redis is used for the Socket.IO adapter and shared matching/pair state, allowing multiple backend instances to work as one service.
-2. Run at least two Node instances behind an HTTPS load balancer. Enable WebSocket upgrades and configure sticky sessions when the load balancer supports them.
+2. Run multiple Node instances behind an HTTPS load balancer. Enable WebSocket upgrades; Socket.IO connection-state recovery and the Redis adapter allow clients to reconnect to another instance.
 3. Set `PORT=4000` for the backend and keep the frontend on a static host/CDN. Route `/api` and `/socket.io` to the backend.
 4. Use a managed TURN service and rotate its credentials regularly.
 5. Use a managed MongoDB deployment for reports and monitor Redis memory, backend CPU, connection count, and Socket.IO errors.
+6. Keep video media peer-to-peer or on TURN; do not proxy video through Node. Size TURN capacity separately because every connected pair can use relay bandwidth.
 
 Without Redis, the server remains suitable for local development but queue and pair state are process-local; it must not be scaled horizontally.
 

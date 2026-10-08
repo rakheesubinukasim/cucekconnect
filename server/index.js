@@ -25,8 +25,12 @@ const OWNER_DISPLAY_NAME = 'rakheesubinukasim';
 const MINIMUM_RESERVED_NAME_LENGTH = 'rakhee'.length;
 const OWNER_NAME_PASSWORD = process.env.OWNER_NAME_PASSWORD;
 const redisEnabled = Boolean(process.env.REDIS_URL);
-const CUCEK_RADIUS_KM = 5;
-const CUCEK_CENTER = { latitude: 9.4604, longitude: 76.4379 };
+const MATCH_DURATION_MS = 3 * 60 * 1000;
+const CAMPUS_RADIUS_KM = 15;
+const CAMPUSES = [
+  { name: 'CUCEK', latitude: 9.4605554, longitude: 76.4373625 },
+  { name: 'CUSAT', latitude: 10.0442634, longitude: 76.3278684 },
+];
 const fallbackIceServers = [
   { urls: process.env.STUN_URL || 'stun:stun.l.google.com:19302' },
   ...(process.env.VITE_SERVER_URL && process.env.VITE_TURN_USERNAME && process.env.VITE_TURN_PASSWORD
@@ -41,10 +45,12 @@ let cachedIceServers = null;
 let cachedIceServersAt = 0;
 const waitingUsers = [];
 const pairedUsers = new Map();
-const activeSessions = new Map();
+const pairTimers = new Map();
 const redis = redisEnabled ? new Redis(process.env.REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1 }) : null;
 const redisPub = redisEnabled ? new Redis(process.env.REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1 }) : null;
 const redisSub = redisEnabled ? new Redis(process.env.REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1 }) : null;
+const onlineSocketsKey = 'cucek:online-sockets';
+let onlineCountBroadcastTimer = null;
 const mongoOptions = {
   serverApi: { version: '1', strict: true, deprecationErrors: true },
   ...(process.env.MONGODB_DB ? { dbName: process.env.MONGODB_DB } : {}),
@@ -60,10 +66,8 @@ async function getIceServers() {
 
 const anonymousAuthSchema = z.object({ displayName: z.string().trim().min(1).max(32).optional() }).strict();
 const reportInputSchema = z.object({ sessionId: z.string().max(100).optional(), reason: z.string().trim().min(3).max(500) }).strict();
-const chatMessageSchema = z.object({ message: z.string().trim().min(1).max(1000) }).strict();
 const queueInputSchema = z.object({
   interest: z.string().trim().min(1).max(40),
-  mode: z.enum(['video', 'text']),
   displayName: z.string().trim().min(1).max(32),
   ownerNamePassword: z.string().max(128).optional(),
   location: z.object({ latitude: z.number().finite(), longitude: z.number().finite() }).strict(),
@@ -72,7 +76,6 @@ const queueInputSchema = z.object({
 function issueToken() {
   const userId = randomUUID();
   const token = jwt.sign({ sub: userId, role: 'student' }, JWT_SECRET, { expiresIn: '12h' });
-  activeSessions.set(userId, { createdAt: Date.now() });
   if (redis) redis.set(`session:${userId}`, 'active', 'EX', 43200).catch(() => {});
   return { userId, token };
 }
@@ -100,6 +103,17 @@ const reportSchema = new mongoose.Schema({
 }, { versionKey: false });
 const Report = mongoose.models.Report || mongoose.model('Report', reportSchema);
 
+function isReservedDisplayName(displayName) {
+  const normalizedName = displayName.trim().toLowerCase().replace(/\s+/g, '');
+  return normalizedName.length >= MINIMUM_RESERVED_NAME_LENGTH && OWNER_DISPLAY_NAME.startsWith(normalizedName);
+}
+
+function hasOwnerAccess(displayName, ownerNamePassword) {
+  return Boolean(OWNER_NAME_PASSWORD)
+    && isReservedDisplayName(displayName)
+    && ownerNamePassword === OWNER_NAME_PASSWORD;
+}
+
 function distanceInKilometres(first, second) {
   const earthRadius = 6371;
   const latitudeDelta = ((second.latitude - first.latitude) * Math.PI) / 180;
@@ -111,22 +125,10 @@ function distanceInKilometres(first, second) {
   return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function isInsideCucek(location) {
-  return location
-    && Number.isFinite(location.latitude)
-    && Number.isFinite(location.longitude)
-    && distanceInKilometres(CUCEK_CENTER, location) <= CUCEK_RADIUS_KM;
-}
-
-function isReservedDisplayName(displayName) {
-  const normalizedName = displayName.trim().toLowerCase().replace(/\s+/g, '');
-  return normalizedName.length >= MINIMUM_RESERVED_NAME_LENGTH && OWNER_DISPLAY_NAME.startsWith(normalizedName);
-}
-
-function hasOwnerAccess(displayName, ownerNamePassword) {
-  return Boolean(OWNER_NAME_PASSWORD)
-    && isReservedDisplayName(displayName)
-    && ownerNamePassword === OWNER_NAME_PASSWORD;
+function nearestCampus(location) {
+  return CAMPUSES
+    .map((campus) => ({ ...campus, distance: distanceInKilometres(campus, location) }))
+    .sort((first, second) => first.distance - second.distance)[0];
 }
 
 function removeFromQueue(socketId) {
@@ -142,6 +144,13 @@ function removeFromQueue(socketId) {
 }
 
 function unpair(socketId) {
+  const timer = pairTimers.get(socketId);
+  if (timer) {
+    clearTimeout(timer);
+    const peerId = redis ? null : pairedUsers.get(socketId);
+    pairTimers.delete(socketId);
+    if (peerId) pairTimers.delete(peerId);
+  }
   if (redis) {
     return redis.get(`cucek:pair:${socketId}`).then(async (peerId) => {
       if (!peerId) return null;
@@ -167,7 +176,7 @@ async function takeCandidate(interest, socketId) {
     if (!(await redis.zrem(`cucek:queue:${interest}`, candidateId))) continue;
     const candidate = await redis.hgetall(`cucek:queue-user:${candidateId}`);
     await redis.del(`cucek:queue-user:${candidateId}`);
-    if (candidate.socketId) return { ...candidate, location: JSON.parse(candidate.location || '{}') };
+    if (candidate.socketId) return candidate;
   }
   return null;
 }
@@ -177,7 +186,7 @@ async function addToQueue(user) {
     waitingUsers.push(user);
     return;
   }
-  await redis.hset(`cucek:queue-user:${user.socketId}`, { ...user, location: JSON.stringify(user.location) });
+  await redis.hset(`cucek:queue-user:${user.socketId}`, user);
   await redis.zadd(`cucek:queue:${user.interest}`, Date.now(), user.socketId);
 }
 
@@ -185,10 +194,19 @@ async function setPair(firstSocketId, secondSocketId) {
   if (!redis) {
     pairedUsers.set(firstSocketId, secondSocketId);
     pairedUsers.set(secondSocketId, firstSocketId);
-    return;
+  } else {
+    await redis.set(`cucek:pair:${firstSocketId}`, secondSocketId, 'EX', MATCH_DURATION_MS / 1000);
+    await redis.set(`cucek:pair:${secondSocketId}`, firstSocketId, 'EX', MATCH_DURATION_MS / 1000);
   }
-  await redis.set(`cucek:pair:${firstSocketId}`, secondSocketId);
-  await redis.set(`cucek:pair:${secondSocketId}`, firstSocketId);
+  const timer = setTimeout(async () => {
+    const peerId = await unpair(firstSocketId);
+    if (peerId) {
+      io.to(firstSocketId).emit('match-expired');
+      io.to(peerId).emit('match-expired');
+    }
+  }, MATCH_DURATION_MS);
+  pairTimers.set(firstSocketId, timer);
+  pairTimers.set(secondSocketId, timer);
 }
 
 async function getPeerId(socketId) {
@@ -196,8 +214,18 @@ async function getPeerId(socketId) {
 }
 
 async function broadcastOnlineCount() {
-  const sockets = await io.fetchSockets();
-  io.emit('online-count', sockets.length);
+  if (onlineCountBroadcastTimer) return;
+  onlineCountBroadcastTimer = setTimeout(async () => {
+    onlineCountBroadcastTimer = null;
+    try {
+      const count = redis
+        ? await redis.scard(onlineSocketsKey)
+        : io.sockets.sockets.size;
+      io.emit('online-count', count);
+    } catch (error) {
+      console.error('Online count update failed:', error.message);
+    }
+  }, 1000);
 }
 
 const app = express();
@@ -246,7 +274,14 @@ app.post('/api/reports', requireAuth, async (request, response) => {
 });
 
 const httpServer = http.createServer(app);
-const io = new Server(httpServer, { cors: corsOptions });
+const io = new Server(httpServer, {
+  cors: corsOptions,
+  transports: ['websocket', 'polling'],
+  pingInterval: 25000,
+  pingTimeout: 20000,
+  maxHttpBufferSize: 100000,
+  connectionStateRecovery: { maxDisconnectionDuration: 2 * 60 * 1000 },
+});
 if (redis) io.adapter(createAdapter(redisPub, redisSub));
 
 io.use((socket, next) => {
@@ -261,7 +296,8 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  socket.emit('online-count', io.sockets.sockets.size);
+  if (redis) redis.sadd(onlineSocketsKey, socket.id).catch(() => {});
+  socket.emit('online-count', redis ? 0 : io.sockets.sockets.size);
   broadcastOnlineCount().catch(() => {});
 
   socket.on('join-queue', async (input) => {
@@ -270,46 +306,32 @@ io.on('connection', (socket) => {
       socket.emit('match-error', { message: 'Invalid matching preferences.' });
       return;
     }
-    const { interest, mode, displayName, location } = result.data;
+    const { interest, displayName, location } = result.data;
     const ownerAccess = hasOwnerAccess(displayName, result.data.ownerNamePassword);
     if (isReservedDisplayName(displayName) && !ownerAccess) {
       socket.emit('match-error', { message: 'That name is reserved. Enter the owner password to use it.' });
       return;
     }
-    await removeFromQueue(socket.id);
-    if (!ownerAccess && !isInsideCucek(location)) {
-      socket.emit('match-error', { message: `You must be within ${CUCEK_RADIUS_KM} km of CUCEK to match.` });
+    const campus = nearestCampus(location);
+    if (campus.distance > CAMPUS_RADIUS_KM) {
+      socket.emit('match-error', { message: `You must be within ${CAMPUS_RADIUS_KM} km of CUCEK or CUSAT to match.` });
       return;
     }
+    await removeFromQueue(socket.id);
     socket.data.role = ownerAccess ? 'admin' : 'student';
     const candidate = await takeCandidate(interest, socket.id);
     if (!candidate) {
-      await addToQueue({ socketId: socket.id, interest, mode, displayName, location });
+      await addToQueue({ socketId: socket.id, interest, displayName, campus: campus.name });
       socket.emit('queue-joined');
       return;
     }
-    const sessionMode = candidate.mode === mode ? mode : 'text';
     await setPair(socket.id, candidate.socketId);
-    io.to(socket.id).emit('match-found', { peerId: candidate.socketId, initiator: true, mode: sessionMode, partnerName: candidate.displayName });
-    io.to(candidate.socketId).emit('match-found', { peerId: socket.id, initiator: false, mode: sessionMode, partnerName: displayName });
+    io.to(socket.id).emit('match-found', { peerId: candidate.socketId, initiator: true, partnerName: candidate.displayName });
+    io.to(candidate.socketId).emit('match-found', { peerId: socket.id, initiator: false, partnerName: displayName });
   });
 
   socket.on('signal', async ({ peerId, signal }) => {
     if (await getPeerId(socket.id) === peerId) io.to(peerId).emit('signal', { peerId: socket.id, signal });
-  });
-
-  socket.on('chat-message', async (input) => {
-    const result = chatMessageSchema.safeParse(input);
-    const peerId = await getPeerId(socket.id);
-    if (!result.success || !peerId) return;
-    io.to(peerId).emit('chat-message', { message: result.data.message, sentAt: new Date().toISOString() });
-  });
-
-  socket.on('mode-change', async ({ mode }) => {
-    const peerId = await getPeerId(socket.id);
-    if ((mode === 'video' || mode === 'text') && peerId) {
-      io.to(peerId).emit('mode-change', { mode });
-    }
   });
 
   socket.on('leave-queue', () => removeFromQueue(socket.id));
@@ -325,6 +347,7 @@ io.on('connection', (socket) => {
     socket.emit('report-accepted');
   });
   socket.on('disconnect', async () => {
+    if (redis) redis.srem(onlineSocketsKey, socket.id).catch(() => {});
     await removeFromQueue(socket.id);
     const peerId = await unpair(socket.id);
     if (peerId) io.to(peerId).emit('peer-left');
@@ -334,8 +357,7 @@ io.on('connection', (socket) => {
 
 async function start() {
   if (redis) {
-    const redis=new Redis(process.env.REDIS_URL, { lazyConnect: true});
-    await redis.connect();
+    await Promise.all([redis.connect(), redisPub.connect(), redisSub.connect()]);
     console.log('Redis connected; multi-instance mode enabled');
   }
   if (process.env.MONGODB_URI) {
