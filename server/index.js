@@ -46,15 +46,25 @@ let cachedIceServersAt = 0;
 const waitingUsers = [];
 const pairedUsers = new Map();
 const pairTimers = new Map();
-const redis = redisEnabled ? new Redis(process.env.REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1 }) : null;
-const redisPub = redisEnabled ? new Redis(process.env.REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1 }) : null;
-const redisSub = redisEnabled ? new Redis(process.env.REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1 }) : null;
+const redisOptions = { lazyConnect: true, maxRetriesPerRequest: 1 };
+const redis = redisEnabled ? new Redis(process.env.REDIS_URL, redisOptions) : null;
+const redisPub = redis ? redis.duplicate() : null;
+const redisSub = redis ? redis.duplicate() : null;
 const onlineSocketsKey = 'cucek:online-sockets';
 let onlineCountBroadcastTimer = null;
+let redisConnectionPromise = null;
 const mongoOptions = {
   serverApi: { version: '1', strict: true, deprecationErrors: true },
   ...(process.env.MONGODB_DB ? { dbName: process.env.MONGODB_DB } : {}),
 };
+
+function connectRedis() {
+  if (!redis) return Promise.resolve();
+  if (!redisConnectionPromise) {
+    redisConnectionPromise = Promise.all([redis.connect(), redisPub.connect(), redisSub.connect()]);
+  }
+  return redisConnectionPromise;
+}
 
 async function getIceServers() {
   const cacheAge = Date.now() - cachedIceServersAt;
@@ -357,7 +367,7 @@ io.on('connection', (socket) => {
 
 async function start() {
   if (redis) {
-    await Promise.all([redis.connect(), redisPub.connect(), redisSub.connect()]);
+    await connectRedis();
     console.log('Redis connected; multi-instance mode enabled');
   }
   if (process.env.MONGODB_URI) {
